@@ -1,5 +1,6 @@
 (function() {
-  let isRunning = false, filledCount = 0, settings = {}, savedState = null, widget = null;
+  let isRunning = false, filledCount = 0, widget = null;
+  let settings = { delay: 200 };
 
   const widgetCSS = `
     #formfiller-widget { position: fixed; top: 20px; right: 20px; width: 220px; background: linear-gradient(135deg, #1a1a2e, #16213e); border: 1px solid #374151; border-radius: 12px; padding: 12px; z-index: 999999; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; color:#eaeaea; cursor: move; user-select: none; }
@@ -34,10 +35,13 @@
     age: () => gen.number(18,65),
     sentence: () => ['Texto de teste','Resposta gerada','Conteúdo de exemplo'][Math.floor(Math.random()*3)],
     paragraph: () => 'Lorem ipsum dolor sit amet, consectetur adipiscing elit.',
-    date: () => {
+    date: (format='mm/dd/yyyy') => {
       const d = new Date(Date.now() - Math.floor(Math.random() * 1000*60*60*24*365*50));
-      const pad = (n) => n.toString().padStart(2,'0');
-      return `${pad(d.getMonth()+1)}/${pad(d.getDate())}/${d.getFullYear()}`; // mm/dd/yyyy
+      const pad = n => n.toString().padStart(2,'0');
+      if(format==='mm/dd/yyyy') return `${pad(d.getMonth()+1)}/${pad(d.getDate())}/${d.getFullYear()}`;
+      if(format==='dd/mm/yyyy') return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
+      if(format==='yyyy-mm-dd') return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+      return `${pad(d.getMonth()+1)}/${pad(d.getDate())}/${d.getFullYear()}`;
     }
   };
 
@@ -56,7 +60,7 @@
     `;
     document.body.appendChild(widget);
     makeDraggable(widget);
-    document.getElementById('ff-start').addEventListener('click', () => { startFilling(false); });
+    document.getElementById('ff-start').addEventListener('click', () => { startFilling(); });
     document.getElementById('ff-stop').addEventListener('click', stop);
   }
 
@@ -94,12 +98,21 @@
   const sleep = ms => new Promise(r=>setTimeout(r,ms));
   const isVisible = el => el && el.offsetParent!==null && getComputedStyle(el).visibility!=='hidden' && getComputedStyle(el).display!=='none';
 
+  function detectDateFormat(f){
+    const t = (f.type||'').toLowerCase();
+    if(t!=='date' && t!=='text') return 'mm/dd/yyyy';
+    const placeholder = f.placeholder || '';
+    if(placeholder.includes('yyyy-mm-dd')) return 'yyyy-mm-dd';
+    if(placeholder.includes('dd/mm/yyyy')) return 'dd/mm/yyyy';
+    return 'mm/dd/yyyy';
+  }
+
   function getValue(f){
     const t = (f.type||'').toLowerCase();
     const c = ((f.name||'') + ' ' + (f.id||'') + ' ' + (f.placeholder||'')).toLowerCase();
     if(t==='email' || c.includes('email')) return gen.email();
     if(t==='tel' || c.includes('phone')) return gen.phone();
-    if(t==='date' || c.includes('birth') || c.includes('nascimento')) return gen.date();
+    if(t==='date' || c.includes('birth') || c.includes('nascimento')) return gen.date(detectDateFormat(f));
     if(c.includes('firstname') || c.includes('primeiro')) return gen.firstName();
     if(c.includes('lastname') || c.includes('apelido')) return gen.lastName();
     if(c.includes('name') || c.includes('nome')) return gen.fullName();
@@ -145,6 +158,12 @@
     for(const name in radios){ if(!isRunning) return false; const vis=radios[name].filter(r=>isVisible(r)&&!r.disabled); if(vis.length&&!vis.some(r=>r.checked)) { fillRadio(vis); filled=true; await sleep(100); } }
 
     if(filled) { filledCount++; updateWidgetUI(true); }
+
+    // -------- Auto Next Button --------
+    const nextBtn = [...document.querySelectorAll('button,input[type="submit"]')]
+      .find(b=>isVisible(b)&&(b.textContent.toLowerCase().includes('continuar')||b.textContent.toLowerCase().includes('next')||b.value?.toLowerCase().includes('continuar')||b.value?.toLowerCase().includes('next')));
+    if(nextBtn) { nextBtn.click(); await sleep(500); }
+
     return filled;
   }
 
@@ -156,14 +175,12 @@
 
   function startFilling(){
     isRunning=true; filledCount=0; updateWidgetUI(true);
-    chrome.runtime.sendMessage({ type:'started' });
     runFiller();
   }
 
   function stop(){
     isRunning=false;
     updateWidgetUI(false);
-    chrome.runtime.sendMessage({ type:'stopped' });
   }
 
   chrome.runtime.onMessage.addListener(msg=>{
